@@ -6,13 +6,14 @@ import { listPosts } from '@/lib/actions/posts'
 import PostsTable from '@/components/posts/PostsTable'
 import PostFilters from '@/components/posts/PostFilters'
 
-interface SearchParams {
+type SearchParams = {
   client_id?: string
   status?: string
   format?: string
   social_network?: string
   priority?: string
   search?: string
+  [key: string]: string | undefined
 }
 
 export default async function PostsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {

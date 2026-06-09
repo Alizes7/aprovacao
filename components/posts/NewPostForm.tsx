@@ -3,13 +3,15 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { createPost } from '@/lib/actions/posts'
-import type { Client, PostFormat, SocialNetwork, PostPriority } from '@/types'
+import type { PostFormat, SocialNetwork, PostPriority } from '@/types'
 import {
   POST_FORMAT_LABELS, SOCIAL_NETWORK_LABELS, POST_PRIORITY_LABELS
 } from '@/types'
 
+type ClientOption = { id: string; name: string; primary_color: string; logo_url: string | null }
+
 interface NewPostFormProps {
-  clients: Client[]
+  clients: ClientOption[]
   defaultClientId?: string
   userId: string
 }
