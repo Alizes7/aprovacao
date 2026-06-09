@@ -1,92 +1,71 @@
-// hooks/useDebounce.ts
-import { useState, useEffect } from 'react'
+'use client'
 
-export function useDebounce<T>(value: T, delay = 300): T {
-  const [debounced, setDebounced] = useState(value)
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delay)
-    return () => clearTimeout(timer)
-  }, [value, delay])
-  return debounced
-}
-
-// hooks/useUnreadCount.ts
-import { useEffect, useState } from 'react'
+import { useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
-export function useUnreadNotifications() {
-  const [count, setCount] = useState(0)
-  const supabase = createClient()
+export function useDirectUpload() {
+  const [progress, setProgress] = useState(0)
+  const [isUploading, setIsUploading] = useState(false)
 
-  useEffect(() => {
-    let mounted = true
+  const upload = useCallback(async (
+    file: File,
+    postId: string,
+    onComplete?: (url: string, path: string) => void,
+    onError?: (error: string) => void
+  ) => {
+    setIsUploading(true)
+    setProgress(0)
 
-    async function fetchCount() {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-
-      const { count: c } = await supabase
-        .from('notifications')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', user.id)
-        .eq('is_read', false)
-
-      if (mounted) setCount(c ?? 0)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    
+    if (!user) {
+      onError?.('Não autenticado')
+      setIsUploading(false)
+      return
     }
 
-    fetchCount()
+    const ext = file.name.split('.').pop()
+    const path = `posts/${postId}/${Date.now()}.${ext}`
 
-    // Realtime subscription
-    const channel = supabase
-      .channel('notifications-count')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'notifications',
-      }, () => fetchCount())
-      .subscribe()
+    const { error } = await supabase.storage
+      .from('post-files')
+      .upload(path, file, {
+        contentType: file.type,
+        upsert: false,
+      })
 
-    return () => {
-      mounted = false
-      supabase.removeChannel(channel)
+    if (error) {
+      onError?.(error.message)
+      setIsUploading(false)
+      return
     }
+
+    const { data: { publicUrl } } = supabase.storage.from('post-files').getPublicUrl(path)
+    
+    // Salvar no banco via Server Action
+    const { error: dbError } = await supabase
+      .from('post_files')
+      .insert({
+        post_id: postId,
+        original_name: file.name,
+        storage_path: path,
+        public_url: publicUrl,
+        mime_type: file.type,
+        size_bytes: file.size,
+        uploaded_by: user.id,
+      })
+
+    if (dbError) {
+      onError?.(dbError.message)
+      setIsUploading(false)
+      return
+    }
+
+    onComplete?.(publicUrl, path)
+    setIsUploading(false)
+    setProgress(100)
   }, [])
 
-  return count
-}
-
-// hooks/useRealtimeComments.ts
-import { useEffect, useState, useCallback } from 'react'
-import type { Comment } from '@/types'
-
-export function useRealtimeComments(postId: string, initial: Comment[]) {
-  const [comments, setComments] = useState(initial)
-  const supabase = createClient()
-
-  const refetch = useCallback(async () => {
-    const { data } = await supabase
-      .from('comments')
-      .select('*, user:profiles(id, full_name, avatar_url, role)')
-      .eq('post_id', postId)
-      .eq('is_deleted', false)
-      .is('parent_id', null)
-      .order('created_at', { ascending: true })
-    if (data) setComments(data as Comment[])
-  }, [postId])
-
-  useEffect(() => {
-    const channel = supabase
-      .channel(`comments-${postId}`)
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'comments',
-        filter: `post_id=eq.${postId}`,
-      }, () => refetch())
-      .subscribe()
-
-    return () => { supabase.removeChannel(channel) }
-  }, [postId, refetch])
-
-  return { comments, refetch }
+  return { upload, progress, isUploading }
 }
