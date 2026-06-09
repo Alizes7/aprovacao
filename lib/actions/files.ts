@@ -7,7 +7,7 @@ import type { ApiResponse } from '@/types'
 
 const ALLOWED = ['image/png', 'image/jpg', 'image/jpeg', 'image/webp', 'application/pdf', 'video/mp4']
 
-export async function uploadPostFile(formData: FormData): Promise<ApiResponse<{ url: string; id: string }>> {
+export async function uploadPostFile(formData: FormData): Promise<<ApiResponse<{ url: string; id: string }>> {
   const supabase = await createSupabaseServer()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { data: null, error: 'Não autenticado', success: false }
@@ -20,40 +20,52 @@ export async function uploadPostFile(formData: FormData): Promise<ApiResponse<{ 
   if (!file) return { data: null, error: 'Arquivo não encontrado', success: false }
   if (!postId) return { data: null, error: 'post_id obrigatório', success: false }
   if (!ALLOWED.includes(file.type)) return { data: null, error: 'Tipo não permitido', success: false }
-  if (file.size > 50 * 1024 * 1024) return { data: null, error: 'Arquivo excede 50MB', success: false }
+  
+  // ⚠️ IMPORTANTE: Vercel limita Server Actions a ~4.5MB
+  if (file.size > 4.5 * 1024 * 1024) {
+    return { data: null, error: 'Arquivo excede o limite de 4.5MB (limite da Vercel). Use upload direto do cliente.', success: false }
+  }
 
   const ext = file.name.split('.').pop()
   const path = `posts/${postId}/${Date.now()}.${ext}`
 
-  const { error: upErr } = await supabase.storage.from('post-files').upload(path, file)
+  // ✅ Converter File para ArrayBuffer antes de enviar ao Supabase
+  const bytes = await file.arrayBuffer()
+  
+  const { error: upErr } = await supabase.storage.from('post-files').upload(path, bytes, {
+    contentType: file.type,
+    upsert: false,
+  })
+  
   if (upErr) return { data: null, error: upErr.message, success: false }
 
   const { data: { publicUrl } } = supabase.storage.from('post-files').getPublicUrl(path)
 
   const { data: fileRecord, error: dbErr } = await supabase
     .from('post_files')
-    .insert({ post_id: postId, version_id: versionId || null, original_name: file.name, storage_path: path, public_url: publicUrl, mime_type: file.type, size_bytes: file.size, carousel_order: carouselOrder, uploaded_by: user.id })
+    .insert({ 
+      post_id: postId, 
+      version_id: versionId || null, 
+      original_name: file.name, 
+      storage_path: path, 
+      public_url: publicUrl, 
+      mime_type: file.type, 
+      size_bytes: file.size, 
+      carousel_order: carouselOrder, 
+      uploaded_by: user.id 
+    })
     .select().single()
 
   if (dbErr) return { data: null, error: dbErr.message, success: false }
 
-  await logAction(supabase, { entity: 'post', entity_id: postId, action: 'arquivo_enviado', user_id: user.id, description: `Arquivo "${file.name}" enviado` })
+  await logAction(supabase, { 
+    entity: 'post', 
+    entity_id: postId, 
+    action: 'arquivo_enviado', 
+    user_id: user.id, 
+    description: `Arquivo "${file.name}" enviado` 
+  })
+  
   revalidatePath(`/posts/${postId}`)
   return { data: { url: publicUrl, id: fileRecord.id }, error: null, success: true }
-}
-
-export async function deletePostFile(fileId: string): Promise<ApiResponse> {
-  const supabase = await createSupabaseServer()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { data: null, error: 'Não autenticado', success: false }
-
-  const { data: file } = await supabase.from('post_files').select('storage_path,post_id,original_name').eq('id', fileId).single()
-  if (!file) return { data: null, error: 'Arquivo não encontrado', success: false }
-
-  await supabase.storage.from('post-files').remove([file.storage_path])
-  await supabase.from('post_files').delete().eq('id', fileId)
-
-  await logAction(supabase, { entity: 'post', entity_id: file.post_id, action: 'arquivo_excluido', user_id: user.id, description: `Arquivo "${file.original_name}" excluído` })
-  revalidatePath(`/posts/${file.post_id}`)
-  return { data: null, error: null, success: true }
 }
