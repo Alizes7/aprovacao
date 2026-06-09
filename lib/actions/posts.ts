@@ -66,6 +66,18 @@ export async function createPost(input: {
 
   if (error) return { data: null, error: error.message, success: false }
 
+  // Create initial version
+  await supabase.from('post_versions').insert({
+    post_id: data.id,
+    version_num: 1,
+    caption: input.caption ?? null,
+    hashtags: input.hashtags ?? null,
+    cta: input.cta ?? null,
+    notes: input.notes ?? null,
+    status: 'rascunho',
+    created_by: user.id,
+  })
+
   await logAction(supabase, { entity: 'post', entity_id: data.id, action: 'post_criado', user_id: user.id, description: `Post "${data.title}" criado` })
   revalidatePath('/dashboard')
   revalidatePath('/posts')
@@ -149,8 +161,12 @@ export async function approvePost(input: { post_id: string; version_id: string; 
   const APPROVABLE = ['enviado_aprovacao', 'aguardando_cliente', 'reenviado_aprovacao']
   if (!APPROVABLE.includes(post.status)) return { data: null, error: 'Post não está disponível para aprovação', success: false }
 
-  const { data: cu } = await supabase.from('client_users').select('role').eq('user_id', user.id).eq('client_id', post.client_id).single()
-  if (cu?.role !== 'client') return { data: null, error: 'Sem permissão para aprovar', success: false }
+  // Allow admin OR client to approve
+  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+  if (profile?.role !== 'admin') {
+    const { data: cu } = await supabase.from('client_users').select('role').eq('user_id', user.id).eq('client_id', post.client_id).single()
+    if (!cu) return { data: null, error: 'Sem permissão para aprovar', success: false }
+  }
 
   await supabase.from('approvals').insert({ post_id: input.post_id, version_id: input.version_id, approved_by: user.id, notes: input.notes ?? null })
   await supabase.from('posts').update({ status: 'aprovado', updated_by: user.id }).eq('id', input.post_id)
@@ -159,7 +175,7 @@ export async function approvePost(input: { post_id: string; version_id: string; 
   await logAction(supabase, { entity: 'post', entity_id: input.post_id, action: 'conteudo_aprovado', user_id: user.id, description: `Post "${post.title}" aprovado` })
 
   if (post.responsible_id) {
-    await createNotification(supabase, { user_id: post.responsible_id, title: 'Post aprovado!', message: `"${post.title}" foi aprovado`, type: 'post_aprovado', post_id: input.post_id })
+    await createNotification(supabase, { user_id: post.responsible_id, title: 'Post aprovado!', message: `"${post.title}" foi aprovado pelo cliente`, type: 'post_aprovado', post_id: input.post_id })
   }
 
   revalidatePath(`/posts/${input.post_id}`)
@@ -176,9 +192,6 @@ export async function requestAdjustment(input: { post_id: string; version_id: st
   const { data: post } = await supabase.from('posts').select('title,client_id,responsible_id').eq('id', input.post_id).single()
   if (!post) return { data: null, error: 'Post não encontrado', success: false }
 
-  const { data: cu } = await supabase.from('client_users').select('role').eq('user_id', user.id).eq('client_id', post.client_id).single()
-  if (cu?.role !== 'client') return { data: null, error: 'Sem permissão', success: false }
-
   await supabase.from('posts').update({ status: 'ajustes_solicitados', updated_by: user.id }).eq('id', input.post_id)
   await supabase.from('post_versions').update({ status: 'ajustes_solicitados' }).eq('id', input.version_id)
   await supabase.from('comments').insert({ post_id: input.post_id, version_id: input.version_id, user_id: user.id, content: input.comment.trim() })
@@ -190,6 +203,26 @@ export async function requestAdjustment(input: { post_id: string; version_id: st
   }
 
   revalidatePath(`/posts/${input.post_id}`)
+  return { data: null, error: null, success: true }
+}
+
+export async function markAsPublished(postId: string): Promise<ApiResponse> {
+  const supabase = await createSupabaseServer()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { data: null, error: 'Não autenticado', success: false }
+
+  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+  if (profile?.role !== 'admin') return { data: null, error: 'Sem permissão', success: false }
+
+  const { data: post } = await supabase.from('posts').select('title,status').eq('id', postId).single()
+  if (!post) return { data: null, error: 'Post não encontrado', success: false }
+  if (post.status !== 'aprovado') return { data: null, error: 'Apenas posts aprovados podem ser marcados como publicados', success: false }
+
+  await supabase.from('posts').update({ status: 'publicado', updated_by: user.id }).eq('id', postId)
+  await logAction(supabase, { entity: 'post', entity_id: postId, action: 'post_publicado', user_id: user.id, description: `Post "${post.title}" marcado como publicado` })
+
+  revalidatePath(`/posts/${postId}`)
+  revalidatePath('/dashboard')
   return { data: null, error: null, success: true }
 }
 
