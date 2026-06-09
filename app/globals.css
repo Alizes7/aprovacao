@@ -1,0 +1,153 @@
+/* app/globals.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* ── Brand Palette ── */
+    --color-ink:        #0F1117;
+    --color-ink-soft:   #3D4050;
+    --color-ink-muted:  #717589;
+    --color-ink-faint:  #B0B4C4;
+
+    --color-surface:    #F7F8FC;
+    --color-base:       #FFFFFF;
+    --color-panel:      #EDEEF5;
+    --color-border:     #DDE0ED;
+    --color-border-strong: #C5C9DC;
+
+    --color-accent:     #5B4FE8;
+    --color-accent-mid: #7B71F0;
+    --color-accent-dim: #E8E6FF;
+
+    --color-success:    #22B573;
+    --color-warning:    #F59E0B;
+    --color-danger:     #EF4444;
+    --color-info:       #3B82F6;
+
+    /* ── Sidebar ── */
+    --sidebar-w: 240px;
+    --sidebar-bg: #12141F;
+    --sidebar-text: #C8CADB;
+    --sidebar-active: #5B4FE8;
+    --sidebar-active-bg: rgba(91, 79, 232, 0.15);
+    --sidebar-hover-bg: rgba(255,255,255,0.05);
+
+    /* ── Radius ── */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+    --radius-xl: 24px;
+  }
+
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: var(--color-surface);
+    color: var(--color-ink);
+  }
+
+  ::selection {
+    background-color: var(--color-accent-dim);
+    color: var(--color-accent);
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--color-border-strong); border-radius: 99px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--color-ink-muted); }
+}
+
+@layer utilities {
+  .text-ink        { color: var(--color-ink); }
+  .text-ink-soft   { color: var(--color-ink-soft); }
+  .text-ink-muted  { color: var(--color-ink-muted); }
+  .text-ink-faint  { color: var(--color-ink-faint); }
+  .bg-surface      { background: var(--color-surface); }
+  .bg-base         { background: var(--color-base); }
+  .bg-panel        { background: var(--color-panel); }
+  .bg-accent       { background: var(--color-accent); }
+  .bg-accent-dim   { background: var(--color-accent-dim); }
+  .text-accent     { color: var(--color-accent); }
+  .border-border   { border-color: var(--color-border); }
+  .ring-accent     { --tw-ring-color: var(--color-accent); }
+
+  /* Card */
+  .card {
+    background: var(--color-base);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+  }
+
+  /* Sidebar link */
+  .sidebar-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: var(--radius-md);
+    color: var(--sidebar-text);
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: all 150ms ease;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .sidebar-link:hover {
+    background: var(--sidebar-hover-bg);
+    color: #ffffff;
+  }
+  .sidebar-link.active {
+    background: var(--sidebar-active-bg);
+    color: #ffffff;
+  }
+  .sidebar-link.active .sidebar-icon {
+    color: var(--sidebar-active);
+  }
+
+  /* Badge base */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 99px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+  }
+
+  /* Focus ring */
+  .focus-ring {
+    outline: none;
+  }
+  .focus-ring:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  /* Animate in */
+  .animate-in {
+    animation: fadeSlideIn 200ms ease forwards;
+  }
+  @keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Loading skeleton */
+  .skeleton {
+    background: linear-gradient(90deg, var(--color-panel) 25%, var(--color-border) 50%, var(--color-panel) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s infinite;
+    border-radius: var(--radius-sm);
+  }
+  @keyframes shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+}
