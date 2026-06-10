@@ -66,7 +66,7 @@ export default async function PostsPage({ searchParams }: { searchParams: Promis
       <PostFilters clients={clients ?? []} currentParams={params} />
 
       <div className="card p-6">
-        <PostsTable posts={posts ?? []} />
+        <PostsTable posts={posts ?? []} profile={profile} />
       </div>
     </div>
   )

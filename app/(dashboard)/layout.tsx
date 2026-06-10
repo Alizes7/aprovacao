@@ -17,10 +17,13 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="flex h-screen overflow-hidden">
+      {/* Sidebar: desktop sempre visível, mobile via drawer interno */}
       <Sidebar profile={profile} />
+
+      {/* Conteúdo principal */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <TopBar profile={profile} unreadCount={unreadCount ?? 0} />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6">{children}</main>
       </div>
     </div>
   )

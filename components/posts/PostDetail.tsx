@@ -11,6 +11,7 @@ import Link from 'next/link'
 import { StatusBadge, PriorityBadge, NetworkBadge } from '@/components/ui/Badge'
 import CommentsSection from '@/components/comments/CommentsSection'
 import FileUpload from '@/components/files/FileUpload'
+import DeletePostButton from '@/components/posts/DeletePostButton'
 import { approvePost, requestAdjustment, sendForApproval, updatePostStatus, markAsPublished } from '@/lib/actions/posts'
 import { POST_FORMAT_LABELS, POST_STATUS_LABELS } from '@/types'
 import type { Post, Profile, Comment, PostVersion, Approval, ActionLog } from '@/types'
@@ -377,6 +378,17 @@ export default function PostDetail({ post, profile, comments, versions, approval
                     <option key={v} value={v}>{l}</option>
                   ))}
                 </select>
+              </div>
+            )}
+
+            {/* Admin: Delete post */}
+            {isAdmin && (
+              <div className="pt-2 border-t border-border mt-2">
+                <DeletePostButton
+                  postId={post.id}
+                  postTitle={post.title}
+                  postStatus={post.status}
+                />
               </div>
             )}
           </div>

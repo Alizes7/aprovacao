@@ -12,10 +12,14 @@ interface TopBarProps {
 export default function TopBar({ profile, unreadCount }: TopBarProps) {
   return (
     <header
-      className="flex items-center justify-between px-6 py-3 bg-base shrink-0"
+      className="flex items-center justify-between px-4 lg:px-6 py-3 bg-base shrink-0"
       style={{ borderBottom: '1px solid var(--color-border)', height: 56 }}
     >
-      <div />
+      {/* Espaço para o botão hamburger no mobile */}
+      <div className="w-10 lg:hidden" />
+
+      {/* Desktop: lado esquerdo vazio */}
+      <div className="hidden lg:block" />
 
       <div className="flex items-center gap-3">
         {/* Notifications */}
