@@ -11,7 +11,7 @@ export default async function DashboardPage() {
   const [metricsResult, postsResult, profileResult] = await Promise.all([
     getDashboardMetrics(),
     listPosts(),
-    supabase.from('profiles').select('role').eq('id', user!.id).single(),
+    supabase.from('profiles').select('*').eq('id', user!.id).single(),
   ])
 
   const profile = profileResult.data

@@ -23,7 +23,7 @@ export default async function PostsPage({ searchParams }: { searchParams: Promis
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('role')
+    .select('*')
     .eq('id', user!.id)
     .single()
 
