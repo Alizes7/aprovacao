@@ -38,9 +38,13 @@ export async function getPost(id: string): Promise<ApiResponse<Post>> {
 
   const { data, error } = await supabase
     .from('posts')
-    .select('*, client:clients(*), responsible:profiles!posts_responsible_id_fkey(id,full_name,avatar_url), files:post_files(*)')
+    .select('*, client:clients(*), responsible:profiles!posts_responsible_id_fkey(id,full_name,avatar_url), files:post_files(*,carousel_order)')
     .eq('id', id)
     .single()
+
+  if (data?.files) {
+    data.files = data.files.sort((a: any, b: any) => (a.carousel_order ?? 0) - (b.carousel_order ?? 0))
+  }
 
   if (error) return { data: null, error: 'Post não encontrado', success: false }
   return { data: data as Post, error: null, success: true }

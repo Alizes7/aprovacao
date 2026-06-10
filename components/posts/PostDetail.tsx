@@ -160,7 +160,8 @@ export default function PostDetail({ post, profile, comments, versions, approval
         {/* ── Left: File Preview ── */}
         <div className="lg:col-span-3 space-y-4">
           <div className="card overflow-hidden">
-            <div className="flex items-center justify-center bg-panel" style={{ minHeight: 320 }}>
+            {/* Main preview */}
+            <div className="flex items-center justify-center bg-panel relative" style={{ minHeight: 320 }}>
               {currentFile ? (
                 <>
                   {isImage && (
@@ -182,6 +183,28 @@ export default function PostDetail({ post, profile, comments, versions, approval
                       </a>
                     </div>
                   )}
+                  {/* Prev / Next arrows */}
+                  {files.length > 1 && (
+                    <>
+                      <button
+                        onClick={() => setCurrentFileIdx(i => Math.max(0, i - 1))}
+                        disabled={currentFileIdx === 0}
+                        className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/40 hover:bg-black/60 flex items-center justify-center disabled:opacity-20 transition-all"
+                      >
+                        <ChevronLeft size={16} className="text-white" />
+                      </button>
+                      <button
+                        onClick={() => setCurrentFileIdx(i => Math.min(files.length - 1, i + 1))}
+                        disabled={currentFileIdx === files.length - 1}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/40 hover:bg-black/60 flex items-center justify-center disabled:opacity-20 transition-all"
+                      >
+                        <ChevronRight size={16} className="text-white" />
+                      </button>
+                      <div className="absolute bottom-2 right-3 bg-black/50 text-white text-xs px-2 py-0.5 rounded-full">
+                        {currentFileIdx + 1} / {files.length}
+                      </div>
+                    </>
+                  )}
                 </>
               ) : (
                 <div className="text-center p-8">
@@ -191,25 +214,33 @@ export default function PostDetail({ post, profile, comments, versions, approval
               )}
             </div>
 
+            {/* Thumbnail strip — shown when 2+ files */}
             {files.length > 1 && (
-              <div className="flex items-center justify-center gap-2 p-3 border-t border-border">
-                <button onClick={() => setCurrentFileIdx(i => Math.max(0, i - 1))} disabled={currentFileIdx === 0} className="p-1 rounded disabled:opacity-30">
-                  <ChevronLeft size={16} />
-                </button>
-                <div className="flex gap-1">
-                  {files.map((_, i) => (
+              <div className="flex gap-2 p-3 border-t border-border overflow-x-auto">
+                {files.map((f: any, i: number) => {
+                  const isImg = f.mime_type?.startsWith('image/')
+                  const active = i === currentFileIdx
+                  return (
                     <button
-                      key={i}
+                      key={f.id}
                       onClick={() => setCurrentFileIdx(i)}
-                      className="w-2 h-2 rounded-full transition-colors"
-                      style={{ background: i === currentFileIdx ? 'var(--color-accent)' : 'var(--color-border-strong)' }}
-                    />
-                  ))}
-                </div>
-                <button onClick={() => setCurrentFileIdx(i => Math.min(files.length - 1, i + 1))} disabled={currentFileIdx === files.length - 1} className="p-1 rounded disabled:opacity-30">
-                  <ChevronRight size={16} />
-                </button>
-                <span className="text-xs text-ink-muted ml-2">{currentFileIdx + 1} / {files.length}</span>
+                      className="shrink-0 rounded-lg overflow-hidden transition-all"
+                      style={{
+                        width: 56, height: 56,
+                        border: active ? '2px solid var(--color-accent)' : '2px solid transparent',
+                        opacity: active ? 1 : 0.55,
+                      }}
+                    >
+                      {isImg ? (
+                        <img src={f.public_url} alt={f.original_name} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-panel">
+                          <FileText size={18} className="text-ink-muted" />
+                        </div>
+                      )}
+                    </button>
+                  )
+                })}
               </div>
             )}
 
