@@ -4,7 +4,13 @@ import { revalidatePath } from 'next/cache'
 import { createSupabaseServer } from '@/lib/supabase/server'
 import { logAction } from './logs'
 import { createNotification } from './notifications'
-import type { Post, PostStatus, ApiResponse } from '@/types'
+import type { Post, PostStatus, ApiResponse, UserRole } from '@/types'
+import { hasPermission } from '@/types'
+
+async function getProfileRole(supabase: any, userId: string): Promise<UserRole> {
+  const { data } = await supabase.from('profiles').select('role').eq('id', userId).single()
+  return (data?.role ?? 'viewer') as UserRole
+}
 
 export async function listPosts(filters?: {
   client_id?: string; status?: PostStatus; format?: string
@@ -14,10 +20,23 @@ export async function listPosts(filters?: {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { data: null, error: 'Não autenticado', success: false }
 
+  const role = await getProfileRole(supabase, user.id)
+
   let query = supabase
     .from('posts')
     .select('*, client:clients(id,name,primary_color,logo_url), responsible:profiles!posts_responsible_id_fkey(id,full_name)')
     .order('created_at', { ascending: false })
+
+  // Cliente só vê posts do seu workspace
+  if (role === 'client' || role === 'viewer') {
+    const { data: memberships } = await supabase
+      .from('workspace_members')
+      .select('workspace:workspaces(client_id)')
+      .eq('user_id', user.id)
+    const clientIds = memberships?.map((m: any) => m.workspace?.client_id).filter(Boolean) ?? []
+    if (clientIds.length === 0) return { data: [], error: null, success: true }
+    query = query.in('client_id', clientIds)
+  }
 
   if (filters?.client_id) query = query.eq('client_id', filters.client_id)
   if (filters?.status) query = query.eq('status', filters.status)
@@ -59,8 +78,8 @@ export async function createPost(input: {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { data: null, error: 'Não autenticado', success: false }
 
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-  if (profile?.role !== 'admin') return { data: null, error: 'Sem permissão', success: false }
+  const role = await getProfileRole(supabase, user.id)
+  if (!hasPermission(role, 'canCreatePost')) return { data: null, error: 'Sem permissão para criar posts', success: false }
   if (!input.title?.trim()) return { data: null, error: 'Título é obrigatório', success: false }
 
   const { data, error } = await supabase
@@ -70,16 +89,11 @@ export async function createPost(input: {
 
   if (error) return { data: null, error: error.message, success: false }
 
-  // Create initial version
   await supabase.from('post_versions').insert({
-    post_id: data.id,
-    version_num: 1,
-    caption: input.caption ?? null,
-    hashtags: input.hashtags ?? null,
-    cta: input.cta ?? null,
-    notes: input.notes ?? null,
-    status: 'rascunho',
-    created_by: user.id,
+    post_id: data.id, version_num: 1,
+    caption: input.caption ?? null, hashtags: input.hashtags ?? null,
+    cta: input.cta ?? null, notes: input.notes ?? null,
+    status: 'rascunho', created_by: user.id,
   })
 
   await logAction(supabase, { entity: 'post', entity_id: data.id, action: 'post_criado', user_id: user.id, description: `Post "${data.title}" criado` })
@@ -93,8 +107,8 @@ export async function updatePost(input: { id: string; [key: string]: any }): Pro
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { data: null, error: 'Não autenticado', success: false }
 
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-  if (profile?.role !== 'admin') return { data: null, error: 'Sem permissão', success: false }
+  const role = await getProfileRole(supabase, user.id)
+  if (!hasPermission(role, 'canEditPost')) return { data: null, error: 'Sem permissão para editar posts', success: false }
 
   const { data: current } = await supabase.from('posts').select('status').eq('id', input.id).single()
   if (current?.status === 'aprovado') return { data: null, error: 'Post aprovado não pode ser editado. Crie nova versão.', success: false }
@@ -114,8 +128,8 @@ export async function deletePost(id: string): Promise<ApiResponse> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { data: null, error: 'Não autenticado', success: false }
 
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-  if (profile?.role !== 'admin') return { data: null, error: 'Sem permissão', success: false }
+  const role = await getProfileRole(supabase, user.id)
+  if (!hasPermission(role, 'canDeletePost')) return { data: null, error: 'Sem permissão para excluir posts', success: false }
 
   const { data: post } = await supabase.from('posts').select('status,title').eq('id', id).single()
   if (post?.status === 'publicado') return { data: null, error: 'Posts publicados não podem ser excluídos', success: false }
@@ -133,7 +147,10 @@ export async function sendForApproval(postId: string): Promise<ApiResponse> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { data: null, error: 'Não autenticado', success: false }
 
-  const { data: post } = await supabase.from('posts').select('title,status,current_version_num').eq('id', postId).single()
+  const role = await getProfileRole(supabase, user.id)
+  if (!hasPermission(role, 'canSendForApproval')) return { data: null, error: 'Sem permissão', success: false }
+
+  const { data: post } = await supabase.from('posts').select('title,status,current_version_num,client_id').eq('id', postId).single()
   if (!post) return { data: null, error: 'Post não encontrado', success: false }
 
   const isResubmit = post.status === 'em_ajuste'
@@ -144,9 +161,19 @@ export async function sendForApproval(postId: string): Promise<ApiResponse> {
 
   await logAction(supabase, { entity: 'post', entity_id: postId, action: 'post_enviado_aprovacao', user_id: user.id, description: `Post "${post.title}" enviado para aprovação` })
 
-  const { data: admins } = await supabase.from('profiles').select('id').eq('role', 'admin').eq('is_active', true)
-  for (const admin of admins ?? []) {
-    await createNotification(supabase, { user_id: admin.id, title: 'Post enviado para aprovação', message: `"${post.title}" aguarda revisão`, type: 'post_enviado_aprovacao', post_id: postId })
+  // Notificar admins e social_media
+  const { data: notifyUsers } = await supabase.from('profiles').select('id').in('role', ['admin', 'social_media']).eq('is_active', true)
+  for (const u of notifyUsers ?? []) {
+    await createNotification(supabase, { user_id: u.id, title: 'Post enviado para aprovação', message: `"${post.title}" aguarda revisão`, type: 'post_enviado_aprovacao', post_id: postId })
+  }
+
+  // Notificar membros do workspace do cliente
+  const { data: ws } = await supabase.from('workspaces').select('id').eq('client_id', post.client_id).single()
+  if (ws) {
+    const { data: members } = await supabase.from('workspace_members').select('user_id').eq('workspace_id', ws.id)
+    for (const m of members ?? []) {
+      await createNotification(supabase, { user_id: m.user_id, title: 'Post enviado para sua aprovação', message: `"${post.title}" aguarda sua aprovação`, type: 'post_enviado_aprovacao', post_id: postId })
+    }
   }
 
   revalidatePath(`/posts/${postId}`)
@@ -159,17 +186,22 @@ export async function approvePost(input: { post_id: string; version_id: string; 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { data: null, error: 'Não autenticado', success: false }
 
+  const role = await getProfileRole(supabase, user.id)
+  if (!hasPermission(role, 'canApprovePost')) return { data: null, error: 'Sem permissão para aprovar', success: false }
+
   const { data: post } = await supabase.from('posts').select('title,status,client_id,responsible_id').eq('id', input.post_id).single()
   if (!post) return { data: null, error: 'Post não encontrado', success: false }
 
   const APPROVABLE = ['enviado_aprovacao', 'aguardando_cliente', 'reenviado_aprovacao']
   if (!APPROVABLE.includes(post.status)) return { data: null, error: 'Post não está disponível para aprovação', success: false }
 
-  // Allow admin OR client to approve
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-  if (profile?.role !== 'admin') {
-    const { data: cu } = await supabase.from('client_users').select('role').eq('user_id', user.id).eq('client_id', post.client_id).single()
-    if (!cu) return { data: null, error: 'Sem permissão para aprovar', success: false }
+  // Client só aprova posts do próprio workspace
+  if (role === 'client') {
+    const { data: ws } = await supabase.from('workspaces').select('id').eq('client_id', post.client_id).single()
+    if (ws) {
+      const { data: member } = await supabase.from('workspace_members').select('id').eq('workspace_id', ws.id).eq('user_id', user.id).single()
+      if (!member) return { data: null, error: 'Sem permissão para aprovar este post', success: false }
+    }
   }
 
   await supabase.from('approvals').insert({ post_id: input.post_id, version_id: input.version_id, approved_by: user.id, notes: input.notes ?? null })
@@ -178,8 +210,12 @@ export async function approvePost(input: { post_id: string; version_id: string; 
 
   await logAction(supabase, { entity: 'post', entity_id: input.post_id, action: 'conteudo_aprovado', user_id: user.id, description: `Post "${post.title}" aprovado` })
 
-  if (post.responsible_id) {
-    await createNotification(supabase, { user_id: post.responsible_id, title: 'Post aprovado!', message: `"${post.title}" foi aprovado pelo cliente`, type: 'post_aprovado', post_id: input.post_id })
+  // Notificar responsável e admins
+  const notifyIds = [post.responsible_id].filter(Boolean) as string[]
+  const { data: admins } = await supabase.from('profiles').select('id').eq('role', 'admin').eq('is_active', true)
+  for (const a of admins ?? []) { if (!notifyIds.includes(a.id)) notifyIds.push(a.id) }
+  for (const uid of notifyIds) {
+    await createNotification(supabase, { user_id: uid, title: 'Post aprovado! 🎉', message: `"${post.title}" foi aprovado pelo cliente`, type: 'post_aprovado', post_id: input.post_id })
   }
 
   revalidatePath(`/posts/${input.post_id}`)
@@ -198,12 +234,22 @@ export async function requestAdjustment(input: { post_id: string; version_id: st
 
   await supabase.from('posts').update({ status: 'ajustes_solicitados', updated_by: user.id }).eq('id', input.post_id)
   await supabase.from('post_versions').update({ status: 'ajustes_solicitados' }).eq('id', input.version_id)
-  await supabase.from('comments').insert({ post_id: input.post_id, version_id: input.version_id, user_id: user.id, content: input.comment.trim() })
+
+  // Comentário do cliente registrado
+  const { data: commentData } = await supabase.from('comments').insert({
+    post_id: input.post_id, version_id: input.version_id,
+    user_id: user.id, content: input.comment.trim(), is_system: false
+  }).select().single()
 
   await logAction(supabase, { entity: 'post', entity_id: input.post_id, action: 'ajuste_solicitado', user_id: user.id, description: `Ajuste solicitado: ${input.comment}` })
 
-  if (post.responsible_id) {
-    await createNotification(supabase, { user_id: post.responsible_id, title: 'Ajuste solicitado', message: input.comment.slice(0, 80), type: 'ajuste_solicitado', post_id: input.post_id })
+  // Notificar responsável + admins + social_media
+  const { data: notifyUsers } = await supabase.from('profiles').select('id').in('role', ['admin', 'social_media']).eq('is_active', true)
+  const notifyIds = new Set((notifyUsers ?? []).map((u: any) => u.id))
+  if (post.responsible_id) notifyIds.add(post.responsible_id)
+
+  for (const uid of notifyIds) {
+    await createNotification(supabase, { user_id: uid, title: '✏️ Ajuste solicitado pelo cliente', message: `"${post.title}": ${input.comment.slice(0, 80)}`, type: 'ajuste_solicitado', post_id: input.post_id })
   }
 
   revalidatePath(`/posts/${input.post_id}`)
@@ -215,12 +261,12 @@ export async function markAsPublished(postId: string): Promise<ApiResponse> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { data: null, error: 'Não autenticado', success: false }
 
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-  if (profile?.role !== 'admin') return { data: null, error: 'Sem permissão', success: false }
+  const role = await getProfileRole(supabase, user.id)
+  if (!hasPermission(role, 'canMarkPublished')) return { data: null, error: 'Sem permissão', success: false }
 
   const { data: post } = await supabase.from('posts').select('title,status').eq('id', postId).single()
   if (!post) return { data: null, error: 'Post não encontrado', success: false }
-  if (post.status !== 'aprovado') return { data: null, error: 'Apenas posts aprovados podem ser marcados como publicados', success: false }
+  if (post.status !== 'aprovado') return { data: null, error: 'Apenas posts aprovados podem ser publicados', success: false }
 
   await supabase.from('posts').update({ status: 'publicado', updated_by: user.id }).eq('id', postId)
   await logAction(supabase, { entity: 'post', entity_id: postId, action: 'post_publicado', user_id: user.id, description: `Post "${post.title}" marcado como publicado` })
@@ -235,8 +281,8 @@ export async function updatePostStatus(postId: string, status: PostStatus): Prom
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { data: null, error: 'Não autenticado', success: false }
 
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-  if (profile?.role !== 'admin') return { data: null, error: 'Sem permissão', success: false }
+  const role = await getProfileRole(supabase, user.id)
+  if (role !== 'admin') return { data: null, error: 'Sem permissão', success: false }
 
   const { data: old } = await supabase.from('posts').select('title').eq('id', postId).single()
   await supabase.from('posts').update({ status, updated_by: user.id }).eq('id', postId)

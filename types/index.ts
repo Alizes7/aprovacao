@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'client' | 'viewer'
+export type UserRole = 'admin' | 'social_media' | 'client' | 'viewer'
 export type PostFormat = 'post_unico' | 'carrossel' | 'story' | 'reels' | 'video' | 'capa' | 'banner' | 'outro'
 export type SocialNetwork = 'instagram' | 'linkedin' | 'facebook' | 'tiktok' | 'youtube_shorts' | 'outra'
 export type PostPriority = 'baixa' | 'media' | 'alta' | 'urgente'
@@ -6,6 +6,82 @@ export type PostStatus = 'rascunho' | 'enviado_aprovacao' | 'aguardando_cliente'
 export type VersionStatus = 'rascunho' | 'enviado' | 'ajustes_solicitados' | 'aprovado' | 'arquivado'
 export type NotificationType = 'post_enviado_aprovacao' | 'cliente_comentou' | 'ajuste_solicitado' | 'post_aprovado' | 'prazo_proximo' | 'prazo_vencido' | 'nova_versao_enviada' | 'post_publicado'
 export type ActionType = 'post_criado' | 'post_editado' | 'post_excluido' | 'arquivo_enviado' | 'arquivo_excluido' | 'post_enviado_aprovacao' | 'comentario_criado' | 'ajuste_solicitado' | 'nova_versao_enviada' | 'conteudo_aprovado' | 'post_publicado' | 'post_arquivado' | 'status_alterado' | 'cliente_criado' | 'cliente_editado' | 'cliente_excluido'
+
+// Permissões por role
+export const ROLE_PERMISSIONS = {
+  admin: {
+    canCreatePost: true,
+    canEditPost: true,
+    canDeletePost: true,
+    canApprovePost: true,
+    canSendForApproval: true,
+    canMarkPublished: true,
+    canManageClients: true,
+    canManageUsers: true,
+    canViewReports: true,
+    canComment: true,
+    canUploadFiles: true,
+  },
+  social_media: {
+    canCreatePost: true,
+    canEditPost: true,
+    canDeletePost: false,
+    canApprovePost: false,
+    canSendForApproval: true,
+    canMarkPublished: true,
+    canManageClients: false,
+    canManageUsers: false,
+    canViewReports: true,
+    canComment: true,
+    canUploadFiles: true,
+  },
+  client: {
+    canCreatePost: false,
+    canEditPost: false,
+    canDeletePost: false,
+    canApprovePost: true,
+    canSendForApproval: false,
+    canMarkPublished: false,
+    canManageClients: false,
+    canManageUsers: false,
+    canViewReports: false,
+    canComment: true,
+    canUploadFiles: false,
+  },
+  viewer: {
+    canCreatePost: false,
+    canEditPost: false,
+    canDeletePost: false,
+    canApprovePost: false,
+    canSendForApproval: false,
+    canMarkPublished: false,
+    canManageClients: false,
+    canManageUsers: false,
+    canViewReports: false,
+    canComment: false,
+    canUploadFiles: false,
+  },
+} as const
+
+export type Permission = keyof typeof ROLE_PERMISSIONS.admin
+
+export function hasPermission(role: UserRole, permission: Permission): boolean {
+  return ROLE_PERMISSIONS[role]?.[permission] ?? false
+}
+
+export const ROLE_LABELS: Record<UserRole, string> = {
+  admin: 'Administrador',
+  social_media: 'Social Media',
+  client: 'Cliente',
+  viewer: 'Visualizador',
+}
+
+export const ROLE_COLORS: Record<UserRole, string> = {
+  admin: 'bg-purple-100 text-purple-700',
+  social_media: 'bg-blue-100 text-blue-700',
+  client: 'bg-green-100 text-green-700',
+  viewer: 'bg-gray-100 text-gray-600',
+}
 
 export interface Profile {
   id: string
@@ -17,6 +93,25 @@ export interface Profile {
   is_active: boolean
   created_at: string
   updated_at: string
+}
+
+export interface Workspace {
+  id: string
+  client_id: string
+  name: string
+  slug: string
+  is_active: boolean
+  created_at: string
+  client?: Client
+}
+
+export interface WorkspaceMember {
+  id: string
+  workspace_id: string
+  user_id: string
+  role: UserRole
+  created_at: string
+  user?: Profile
 }
 
 export interface Client {
@@ -33,6 +128,7 @@ export interface Client {
   created_by: string | null
   created_at: string
   updated_at: string
+  workspace?: Workspace
 }
 
 export interface Post {
@@ -140,6 +236,30 @@ export interface Notification {
   post_id: string | null
   created_at: string
   post?: Post
+}
+
+export interface ClientApprovalMetrics {
+  client_id: string
+  client_name: string
+  client_color: string
+  total_posts: number
+  approved_first_try: number
+  requested_adjustments: number
+  approval_rate: number
+  avg_approval_hours: number | null
+}
+
+export interface MonthlyReport {
+  client_id: string
+  client_name: string
+  month: number
+  year: number
+  total_created: number
+  total_approved: number
+  total_rejected: number
+  total_published: number
+  avg_approval_hours: number | null
+  posts: Post[]
 }
 
 export interface ApiResponse<T = void> {
