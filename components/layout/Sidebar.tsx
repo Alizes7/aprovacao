@@ -84,7 +84,7 @@ export default function Sidebar({ profile }: SidebarProps) {
 
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 space-y-0.5">
-        {NAV_ITEMS.filter(item => !item.adminOnly || isAdmin).map(({ href, label, icon: Icon }) => {
+        {NAV_ITEMS.filter(item => item.roles.includes(profile?.role ?? 'viewer')).map(({ href, label, icon: Icon }) => {
           const isActive = pathname === href || (href !== '/dashboard' && pathname.startsWith(href))
           return (
             <Link
