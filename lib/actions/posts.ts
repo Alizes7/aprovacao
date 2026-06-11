@@ -12,6 +12,16 @@ async function getProfileRole(supabase: any, userId: string): Promise<UserRole> 
   return (data?.role ?? 'viewer') as UserRole
 }
 
+// Retorna os client_ids que o usuário tem acesso via workspace
+async function getAllowedClientIds(supabase: any, userId: string): Promise<string[] | null> {
+  const { data: memberships } = await supabase
+    .from('workspace_members')
+    .select('workspace:workspaces(client_id)')
+    .eq('user_id', userId)
+  const ids = memberships?.map((m: any) => m.workspace?.client_id).filter(Boolean) ?? []
+  return ids
+}
+
 export async function listPosts(filters?: {
   client_id?: string; status?: PostStatus; format?: string
   social_network?: string; priority?: string; search?: string
@@ -27,15 +37,16 @@ export async function listPosts(filters?: {
     .select('*, client:clients(id,name,primary_color,logo_url), responsible:profiles!posts_responsible_id_fkey(id,full_name)')
     .order('created_at', { ascending: false })
 
-  // Cliente só vê posts do seu workspace
+  // client e viewer só veem posts dos workspaces deles
   if (role === 'client' || role === 'viewer') {
-    const { data: memberships } = await supabase
-      .from('workspace_members')
-      .select('workspace:workspaces(client_id)')
-      .eq('user_id', user.id)
-    const clientIds = memberships?.map((m: any) => m.workspace?.client_id).filter(Boolean) ?? []
-    if (clientIds.length === 0) return { data: [], error: null, success: true }
+    const clientIds = await getAllowedClientIds(supabase, user.id)
+    if (!clientIds || clientIds.length === 0) return { data: [], error: null, success: true }
     query = query.in('client_id', clientIds)
+
+    // client só vê posts enviados para aprovação em diante (não vê rascunhos)
+    if (role === 'client') {
+      query = query.not('status', 'eq', 'rascunho')
+    }
   }
 
   if (filters?.client_id) query = query.eq('client_id', filters.client_id)
@@ -55,17 +66,32 @@ export async function getPost(id: string): Promise<ApiResponse<Post>> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { data: null, error: 'Não autenticado', success: false }
 
+  const role = await getProfileRole(supabase, user.id)
+
   const { data, error } = await supabase
     .from('posts')
     .select('*, client:clients(*), responsible:profiles!posts_responsible_id_fkey(id,full_name,avatar_url), files:post_files(*,carousel_order)')
     .eq('id', id)
     .single()
 
+  if (error || !data) return { data: null, error: 'Post não encontrado', success: false }
+
+  // Verificar acesso por workspace para client/viewer
+  if (role === 'client' || role === 'viewer') {
+    const clientIds = await getAllowedClientIds(supabase, user.id)
+    if (!clientIds?.includes(data.client_id)) {
+      return { data: null, error: 'Sem permissão para visualizar este post', success: false }
+    }
+    // client não vê rascunhos
+    if (role === 'client' && data.status === 'rascunho') {
+      return { data: null, error: 'Post não disponível', success: false }
+    }
+  }
+
   if (data?.files) {
     data.files = data.files.sort((a: any, b: any) => (a.carousel_order ?? 0) - (b.carousel_order ?? 0))
   }
 
-  if (error) return { data: null, error: 'Post não encontrado', success: false }
   return { data: data as Post, error: null, success: true }
 }
 
@@ -111,7 +137,7 @@ export async function updatePost(input: { id: string; [key: string]: any }): Pro
   if (!hasPermission(role, 'canEditPost')) return { data: null, error: 'Sem permissão para editar posts', success: false }
 
   const { data: current } = await supabase.from('posts').select('status').eq('id', input.id).single()
-  if (current?.status === 'aprovado') return { data: null, error: 'Post aprovado não pode ser editado. Crie nova versão.', success: false }
+  if (current?.status === 'aprovado') return { data: null, error: 'Post aprovado não pode ser editado.', success: false }
 
   const { id, ...rest } = input
   const { data, error } = await supabase.from('posts').update({ ...rest, updated_by: user.id }).eq('id', id).select().single()
@@ -158,7 +184,6 @@ export async function sendForApproval(postId: string): Promise<ApiResponse> {
 
   await supabase.from('posts').update({ status: newStatus, updated_by: user.id }).eq('id', postId)
   await supabase.from('post_versions').update({ status: 'enviado' }).eq('post_id', postId).eq('version_num', post.current_version_num)
-
   await logAction(supabase, { entity: 'post', entity_id: postId, action: 'post_enviado_aprovacao', user_id: user.id, description: `Post "${post.title}" enviado para aprovação` })
 
   // Notificar admins e social_media
@@ -195,25 +220,24 @@ export async function approvePost(input: { post_id: string; version_id: string; 
   const APPROVABLE = ['enviado_aprovacao', 'aguardando_cliente', 'reenviado_aprovacao']
   if (!APPROVABLE.includes(post.status)) return { data: null, error: 'Post não está disponível para aprovação', success: false }
 
-  // Client só aprova posts do próprio workspace
+  // client só aprova posts do próprio workspace
   if (role === 'client') {
-    const { data: ws } = await supabase.from('workspaces').select('id').eq('client_id', post.client_id).single()
-    if (ws) {
-      const { data: member } = await supabase.from('workspace_members').select('id').eq('workspace_id', ws.id).eq('user_id', user.id).single()
-      if (!member) return { data: null, error: 'Sem permissão para aprovar este post', success: false }
+    const clientIds = await getAllowedClientIds(supabase, user.id)
+    if (!clientIds?.includes(post.client_id)) {
+      return { data: null, error: 'Sem permissão para aprovar este post', success: false }
     }
   }
 
   await supabase.from('approvals').insert({ post_id: input.post_id, version_id: input.version_id, approved_by: user.id, notes: input.notes ?? null })
   await supabase.from('posts').update({ status: 'aprovado', updated_by: user.id }).eq('id', input.post_id)
   await supabase.from('post_versions').update({ status: 'aprovado' }).eq('id', input.version_id)
-
   await logAction(supabase, { entity: 'post', entity_id: input.post_id, action: 'conteudo_aprovado', user_id: user.id, description: `Post "${post.title}" aprovado` })
 
-  // Notificar responsável e admins
-  const notifyIds = [post.responsible_id].filter(Boolean) as string[]
+  // Notificar responsável + admins
+  const notifyIds = new Set<string>()
+  if (post.responsible_id) notifyIds.add(post.responsible_id)
   const { data: admins } = await supabase.from('profiles').select('id').eq('role', 'admin').eq('is_active', true)
-  for (const a of admins ?? []) { if (!notifyIds.includes(a.id)) notifyIds.push(a.id) }
+  for (const a of admins ?? []) notifyIds.add(a.id)
   for (const uid of notifyIds) {
     await createNotification(supabase, { user_id: uid, title: 'Post aprovado! 🎉', message: `"${post.title}" foi aprovado pelo cliente`, type: 'post_aprovado', post_id: input.post_id })
   }
@@ -229,17 +253,26 @@ export async function requestAdjustment(input: { post_id: string; version_id: st
   if (!user) return { data: null, error: 'Não autenticado', success: false }
   if (!input.comment?.trim()) return { data: null, error: 'Comentário é obrigatório', success: false }
 
+  const role = await getProfileRole(supabase, user.id)
+
   const { data: post } = await supabase.from('posts').select('title,client_id,responsible_id').eq('id', input.post_id).single()
   if (!post) return { data: null, error: 'Post não encontrado', success: false }
+
+  // client só solicita ajuste em posts do próprio workspace
+  if (role === 'client') {
+    const clientIds = await getAllowedClientIds(supabase, user.id)
+    if (!clientIds?.includes(post.client_id)) {
+      return { data: null, error: 'Sem permissão', success: false }
+    }
+  }
 
   await supabase.from('posts').update({ status: 'ajustes_solicitados', updated_by: user.id }).eq('id', input.post_id)
   await supabase.from('post_versions').update({ status: 'ajustes_solicitados' }).eq('id', input.version_id)
 
-  // Comentário do cliente registrado
-  const { data: commentData } = await supabase.from('comments').insert({
+  await supabase.from('comments').insert({
     post_id: input.post_id, version_id: input.version_id,
     user_id: user.id, content: input.comment.trim(), is_system: false
-  }).select().single()
+  })
 
   await logAction(supabase, { entity: 'post', entity_id: input.post_id, action: 'ajuste_solicitado', user_id: user.id, description: `Ajuste solicitado: ${input.comment}` })
 
@@ -247,7 +280,6 @@ export async function requestAdjustment(input: { post_id: string; version_id: st
   const { data: notifyUsers } = await supabase.from('profiles').select('id').in('role', ['admin', 'social_media']).eq('is_active', true)
   const notifyIds = new Set((notifyUsers ?? []).map((u: any) => u.id))
   if (post.responsible_id) notifyIds.add(post.responsible_id)
-
   for (const uid of notifyIds) {
     await createNotification(supabase, { user_id: uid, title: '✏️ Ajuste solicitado pelo cliente', message: `"${post.title}": ${input.comment.slice(0, 80)}`, type: 'ajuste_solicitado', post_id: input.post_id })
   }
@@ -298,23 +330,43 @@ export async function getDashboardMetrics() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { data: null, error: 'Não autenticado', success: false }
 
+  const role = await getProfileRole(supabase, user.id)
   const now = new Date()
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
 
+  // Para client/viewer filtrar apenas os clientes do workspace
+  let clientFilter: string[] | null = null
+  if (role === 'client' || role === 'viewer') {
+    clientFilter = await getAllowedClientIds(supabase, user.id)
+    if (!clientFilter || clientFilter.length === 0) {
+      return {
+        data: { total_posts_month: 0, awaiting_approval: 0, approved: 0, adjustments_requested: 0, published: 0, active_clients: 0, overdue: 0 },
+        error: null, success: true,
+      }
+    }
+  }
+
+  function applyClientFilter(q: any) {
+    return clientFilter ? q.in('client_id', clientFilter) : q
+  }
+
   const [a, b, c, d, e, f] = await Promise.all([
-    supabase.from('posts').select('*', { count: 'exact', head: true }).gte('created_at', monthStart),
-    supabase.from('posts').select('*', { count: 'exact', head: true }).in('status', ['enviado_aprovacao', 'aguardando_cliente', 'reenviado_aprovacao']),
-    supabase.from('posts').select('*', { count: 'exact', head: true }).eq('status', 'aprovado'),
-    supabase.from('posts').select('*', { count: 'exact', head: true }).in('status', ['ajustes_solicitados', 'em_ajuste']),
-    supabase.from('posts').select('*', { count: 'exact', head: true }).eq('status', 'publicado'),
-    supabase.from('clients').select('*', { count: 'exact', head: true }).eq('is_active', true),
+    applyClientFilter(supabase.from('posts').select('*', { count: 'exact', head: true }).gte('created_at', monthStart)),
+    applyClientFilter(supabase.from('posts').select('*', { count: 'exact', head: true }).in('status', ['enviado_aprovacao', 'aguardando_cliente', 'reenviado_aprovacao'])),
+    applyClientFilter(supabase.from('posts').select('*', { count: 'exact', head: true }).eq('status', 'aprovado')),
+    applyClientFilter(supabase.from('posts').select('*', { count: 'exact', head: true }).in('status', ['ajustes_solicitados', 'em_ajuste'])),
+    applyClientFilter(supabase.from('posts').select('*', { count: 'exact', head: true }).eq('status', 'publicado')),
+    clientFilter
+      ? supabase.from('clients').select('*', { count: 'exact', head: true }).in('id', clientFilter)
+      : supabase.from('clients').select('*', { count: 'exact', head: true }).eq('is_active', true),
   ])
 
-  const { count: overdue } = await supabase
-    .from('posts')
-    .select('*', { count: 'exact', head: true })
-    .not('status', 'in', '("aprovado","publicado","arquivado")')
-    .lt('approval_deadline', now.toISOString())
+  const overdueQuery = applyClientFilter(
+    supabase.from('posts').select('*', { count: 'exact', head: true })
+      .not('status', 'in', '("aprovado","publicado","arquivado")')
+      .lt('approval_deadline', now.toISOString())
+  )
+  const { count: overdue } = await overdueQuery
 
   return {
     data: {

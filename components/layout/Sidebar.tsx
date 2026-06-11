@@ -17,11 +17,11 @@ interface SidebarProps {
 }
 
 const NAV_ITEMS = [
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/posts', label: 'Posts', icon: FileImage },
-  { href: '/clients', label: 'Clientes', icon: Users, adminOnly: true },
-  { href: '/notifications', label: 'Notificações', icon: Bell },
-  { href: '/settings', label: 'Configurações', icon: Settings },
+  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['admin','social_media','client','viewer'] },
+  { href: '/posts', label: 'Posts', icon: FileImage, roles: ['admin','social_media','client','viewer'] },
+  { href: '/clients', label: 'Clientes', icon: Users, roles: ['admin'] },
+  { href: '/notifications', label: 'Notificações', icon: Bell, roles: ['admin','social_media','client','viewer'] },
+  { href: '/settings', label: 'Configurações', icon: Settings, roles: ['admin','social_media'] },
 ]
 
 export default function Sidebar({ profile }: SidebarProps) {
