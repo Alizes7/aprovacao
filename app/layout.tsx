@@ -19,7 +19,7 @@ const dmMono = DM_Mono({
 export const metadata: Metadata = {
   title: 'Portal de Aprovação | Bescheiben',
   description: 'Sistema de aprovação de posts para agências e clientes',
-  icons: { icon: '/favicon.ico' },
+  icons: { icon: '/logo-bescheiben.png', apple: '/logo-bescheiben.png' },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
